@@ -1,0 +1,50 @@
+{
+  "name": "figma-pixel-bridge",
+  "version": "0.1.0",
+  "description": "High-fidelity Figma-to-frontend bridge with pixel-lock previews, exported assets, MCP-style tools, and visual self-checks.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "figma-pixel": "./scripts/figma-pixel.mjs",
+    "figma-pixel-mcp": "./scripts/figma-mcp-server.mjs",
+    "figma-pixel-plugin-bridge": "./scripts/figma-plugin-bridge.mjs"
+  },
+  "files": [
+    "scripts/",
+    "docs/*.md",
+    "figma-plugin/",
+    "figma-importer-plugin/",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "sync": "node scripts/figma-pixel.mjs sync",
+    "serve": "node scripts/figma-pixel.mjs serve",
+    "plugin-bridge": "node scripts/figma-pixel.mjs plugin-bridge",
+    "verify": "node scripts/figma-pixel.mjs verify",
+    "auto-tune": "node scripts/figma-pixel.mjs auto-tune",
+    "mcp": "node scripts/figma-pixel.mjs mcp",
+    "figma:sync": "node scripts/figma-sync.mjs",
+    "figma:mcp": "node scripts/figma-mcp-server.mjs",
+    "preview:figma": "node scripts/serve-preview.mjs generated/figma-preview 4173",
+    "figma:plugin-bridge": "node scripts/figma-plugin-bridge.mjs",
+    "figma:verify": "node scripts/figma-verify.mjs",
+    "figma:auto-tune": "node scripts/figma-auto-tune.mjs",
+    "figma:import-bridge": "node scripts/frontend-to-figma-bridge.mjs",
+    "figma:import-payload": "node scripts/frontend-to-figma-payload.mjs",
+    "pack:dry": "npm pack --dry-run"
+  },
+  "keywords": [
+    "figma",
+    "figma-to-code",
+    "mcp",
+    "design-tokens",
+    "visual-regression",
+    "pixel-perfect"
+  ]
+}

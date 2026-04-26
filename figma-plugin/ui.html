@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font:12px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#101216; color:#f4f7fb; }
+    .wrap { padding:18px; }
+    h1 { margin:0 0 8px; font-size:16px; }
+    p { margin:0 0 14px; color:#aab4c2; }
+    label { display:block; margin:12px 0 5px; color:#dbe5f3; font-weight:600; }
+    input, select { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #303844; border-radius:8px; background:#171b22; color:#fff; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    button { width:100%; margin-top:14px; border:0; border-radius:10px; padding:11px 12px; background:#00f0ff; color:#001114; font-weight:800; cursor:pointer; }
+    button.secondary { background:#242b35; color:#dbe5f3; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .status { margin-top:14px; padding:10px; min-height:76px; border:1px solid #27303b; border-radius:10px; background:#0b0d11; color:#94a3b8; white-space:pre-wrap; overflow:auto; max-height:160px; }
+    .ok { color:#7cffaa; } .err { color:#ff7373; }
+    .hint { margin-top:12px; font-size:11px; color:#7d8a9d; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Pixel-Lock Exporter</h1>
+    <p>导出当前选中 Frame；如果没有选中，则导出当前页面所有顶层 Frame。</p>
+    <label>Bridge URL</label>
+    <input id="bridge" value="http://localhost:4758" />
+    <div class="row">
+      <div>
+        <label>PNG scale</label>
+        <select id="scale">
+          <option value="4" selected>4x 稳定高清</option>
+          <option value="6">6x 超清</option>
+          <option value="8">8x 极限</option>
+        </select>
+      </div>
+      <div>
+        <label>范围</label>
+        <select id="scope">
+          <option value="selection" selected>选中优先</option>
+          <option value="page">整页顶层</option>
+        </select>
+      </div>
+    </div>
+    <button id="start">开始导出到项目</button>
+    <button id="health" class="secondary">检查本地 Bridge</button>
+    <div id="status" class="status">先在终端运行：npm run plugin-bridge</div>
+    <div class="hint">精确模式会导出 root SVG + root PNG + 原始图片 bytes + icon SVG，并生成可编辑重建预览。</div>
+  </div>
+  <script>
+    const statusEl = document.querySelector('#status');
+    const startBtn = document.querySelector('#start');
+    const healthBtn = document.querySelector('#health');
+    const bridgeEl = document.querySelector('#bridge');
+    const scaleEl = document.querySelector('#scale');
+    const scopeEl = document.querySelector('#scope');
+
+    function log(message, type = '') {
+      const prefix = type === 'error' ? '✖ ' : type === 'ok' ? '✓ ' : '• ';
+      statusEl.textContent += '\n' + prefix + message;
+      statusEl.scrollTop = statusEl.scrollHeight;
+    }
+
+    async function checkHealth() {
+      const url = bridgeEl.value.replace(/\/$/, '') + '/health';
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Bridge health failed: ' + response.status);
+      return response.json();
+    }
+
+    healthBtn.onclick = async () => {
+      statusEl.textContent = '检查 bridge...';
+      try {
+        const health = await checkHealth();
+        log('Bridge ready: ' + JSON.stringify(health), 'ok');
+      } catch (error) {
+        log(error.message, 'error');
+      }
+    };
+
+    startBtn.onclick = async () => {
+      startBtn.disabled = true;
+      statusEl.textContent = '准备导出...';
+      try {
+        await checkHealth();
+        parent.postMessage({ pluginMessage: { type: 'start-export', bridgeUrl: bridgeEl.value, scale: Number(scaleEl.value), scope: scopeEl.value } }, '*');
+      } catch (error) {
+        log(error.message, 'error');
+        startBtn.disabled = false;
+      }
+    };
+
+    window.onmessage = async (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'status') {
+        log(msg.message, msg.level);
+        if (msg.done) startBtn.disabled = false;
+        return;
+      }
+      if (msg.type === 'upload') {
+        try {
+          const url = (msg.bridgeUrl || bridgeEl.value).replace(/\/$/, '') + '/ingest';
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(msg.payload),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || 'Upload failed: ' + response.status);
+          parent.postMessage({ pluginMessage: { type: 'upload-ack', requestId: msg.requestId, result: body } }, '*');
+        } catch (error) {
+          parent.postMessage({ pluginMessage: { type: 'upload-ack', requestId: msg.requestId, error: error.message } }, '*');
+        }
+      }
+    };
+  </script>
+</body>
+</html>

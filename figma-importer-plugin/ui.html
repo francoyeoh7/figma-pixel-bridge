@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; background:#101216; color:#f4f7fb; font:12px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { padding:18px; }
+    h1 { margin:0 0 8px; font-size:16px; }
+    p { margin:0 0 12px; color:#aab4c2; }
+    label { display:block; margin:12px 0 5px; color:#dbe5f3; font-weight:700; }
+    input { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #303844; border-radius:8px; background:#171b22; color:#fff; }
+    .checks { display:flex; flex-direction:column; gap:8px; margin:12px 0; color:#cbd5e1; }
+    .checks label { margin:0; display:flex; gap:8px; align-items:center; font-weight:500; }
+    .checks input { width:auto; }
+    button { width:100%; margin-top:12px; border:0; border-radius:10px; padding:11px 12px; background:#dfff00; color:#121400; font-weight:900; cursor:pointer; }
+    button.secondary { background:#242b35; color:#dbe5f3; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .status { margin-top:14px; padding:10px; min-height:120px; max-height:220px; overflow:auto; white-space:pre-wrap; border:1px solid #27303b; border-radius:10px; background:#0b0d11; color:#94a3b8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Frontend → Figma Importer</h1>
+    <p>把本地 `this project folder` 的前端/Pencil 设计数据创建到当前 Figma 文件。</p>
+    <label>Bridge URL</label>
+    <input id="bridge" value="http://localhost:4760" />
+    <div class="checks">
+      <label><input id="images" type="checkbox" checked /> 导入优化背景/人物图层</label>
+      <label><input id="newPage" type="checkbox" checked /> 创建新页面，避免覆盖当前内容</label>
+    </div>
+    <button id="import">导入到当前 Figma 文件</button>
+    <button id="health" class="secondary">检查本地 Bridge</button>
+    <div id="status" class="status">先运行：npm run figma:import-bridge</div>
+  </div>
+  <script>
+    const statusEl = document.querySelector('#status');
+    const importBtn = document.querySelector('#import');
+    const bridgeEl = document.querySelector('#bridge');
+    const imagesEl = document.querySelector('#images');
+    const newPageEl = document.querySelector('#newPage');
+    function log(message) { statusEl.textContent += '\n• ' + message; statusEl.scrollTop = statusEl.scrollHeight; }
+    async function health() {
+      const url = bridgeEl.value.replace(/\/$/, '') + '/health';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Bridge 不可用: ' + res.status);
+      return res.json();
+    }
+    document.querySelector('#health').onclick = async () => {
+      statusEl.textContent = '检查 bridge...';
+      try { log(JSON.stringify(await health())); } catch (e) { log(e.message); }
+    };
+    importBtn.onclick = async () => {
+      importBtn.disabled = true;
+      statusEl.textContent = '读取本地转换数据...';
+      try {
+        await health();
+        const url = bridgeEl.value.replace(/\/$/, '') + '/payload?images=' + (imagesEl.checked ? 'true' : 'false');
+        const res = await fetch(url);
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || 'payload fetch failed');
+        log('读取到 ' + payload.roots.length + ' 个顶层设计稿，开始创建节点...');
+        parent.postMessage({ pluginMessage: { type: 'import-payload', payload, options: { newPage: newPageEl.checked } } }, '*');
+      } catch (e) {
+        log(e.message);
+        importBtn.disabled = false;
+      }
+    };
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'status') log(msg.message);
+      if (msg.type === 'done') { log(msg.message); importBtn.disabled = false; }
+    };
+  </script>
+</body>
+</html>

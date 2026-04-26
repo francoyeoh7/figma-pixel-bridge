@@ -1,0 +1,16 @@
+{
+  "name": "Figma Pixel Bridge Exporter",
+  "id": "figma-pixel-bridge-exporter",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": [
+    "figma"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "http://localhost:4758"
+    ],
+    "reasoning": "Send selected Figma nodes and high-resolution exported assets to the local bridge server running inside the project."
+  }
+}

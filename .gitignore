@@ -1,0 +1,27 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Runtime/cache output
+.figma-cache/
+generated/
+reports/
+public/figma-assets/
+
+# Dependencies
+node_modules/
+
+# OS/editor noise
+.DS_Store
+*.log
+
+# Local one-off screenshots and binaries
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+
+# Local planning notes, not needed for the public package
+docs/superpowers/
+*.tgz

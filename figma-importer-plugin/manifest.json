@@ -1,0 +1,16 @@
+{
+  "name": "Figma Pixel Bridge Importer",
+  "id": "figma-pixel-bridge-importer",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": [
+    "figma"
+  ],
+  "networkAccess": {
+    "allowedDomains": [
+      "http://localhost:4760"
+    ],
+    "reasoning": "Fetch local frontend-to-Figma conversion payload from the project bridge."
+  }
+}
