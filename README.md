@@ -1,16 +1,65 @@
 # Figma Pixel Bridge
 
-A local Figma-to-frontend bridge for high-fidelity UI reconstruction. It extracts Figma nodes, exports sharp assets, writes a normalized design manifest, generates a runnable preview, and can self-check visual similarity with a pixel-lock fallback.
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-experimental-orange.svg)](#project-status)
 
-## Why this exists
+Figma Pixel Bridge is a local Figma-to-frontend pipeline for generating high-fidelity, previewable UI from Figma frames. It combines structured Figma metadata with high-resolution frame exports, so AI agents and developers can work from both the design tree and the visual source of truth.
 
-Classic Figma-to-code tools often translate only the node JSON. That misses Figma's final rendered output: image fills, masks, antialiasing, blend/effects, font rendering, and high-resolution exports. This project uses a hybrid pipeline:
+Unlike pure "Figma JSON to divs" converters, this project uses a hybrid rendering strategy: keep an exact pixel-lock layer for visual parity, then layer editable reconstruction, assets, hotspots, route transitions, and visual regression checks on top.
 
-1. **Design manifest** for structured nodes, text, colors, radii, typography, components, and geometry.
-2. **Asset exporter** for original image fills, SVG icons, and 4x frame exports.
-3. **Preview generator** with an editable reconstruction layer plus a pixel-lock layer.
-4. **Interaction layer** for hotspots, routes, and motion without destroying visual fidelity.
-5. **Visual diff / auto-tune** to keep the final preview above a configurable similarity threshold.
+## Why it exists
+
+Figma-to-code workflows usually fail in the last 20%: image crops drift, icons blur, text rendering changes, effects flatten incorrectly, and complex visual layouts stop matching the original file. Figma Pixel Bridge is built for that fidelity gap.
+
+It is useful when you need to:
+
+- Export a Figma frame into a runnable local preview.
+- Preserve sharp images, SVG icons, and full-frame visual fidelity.
+- Give an AI coding agent structured design context and local assets.
+- Validate output against an exported Figma reference.
+- Fall back to pixel-lock rendering when editable reconstruction is not accurate enough.
+
+## How it works
+
+```mermaid
+flowchart LR
+  A[Figma frame] --> B[Figma API or local plugin]
+  B --> C[Design manifest]
+  B --> D[Images / SVGs / 4x frame exports]
+  C --> E[Preview generator]
+  D --> E
+  E --> F[Local interactive preview]
+  F --> G[Visual diff]
+  G --> H[Auto tune / pixel-lock fallback]
+```
+
+Core layers:
+
+- **Design manifest** - normalized nodes, text, fills, strokes, radii, typography, geometry, components, and asset references.
+- **Asset exporter** - original image fills, SVG vector exports, and high-resolution frame exports.
+- **Editable layer** - HTML/CSS reconstruction for inspection and future conversion work.
+- **Pixel-lock layer** - exact Figma SVG/PNG frame export used as the visual source of truth.
+- **Interaction layer** - transparent hotspots over the exact layer for route changes and UI interactions.
+- **Visual diff layer** - compares generated output with the Figma export and records a report.
+
+See [`docs/architecture.md`](docs/architecture.md) for a deeper technical breakdown.
+
+## Features
+
+- Figma URL parsing for `fileKey` and `node-id`.
+- Figma REST API sync for files, nodes, images, and exports.
+- Figma plugin bridge for rate-limit fallback and selected-frame export.
+- Local asset pipeline for images, SVG icons, and high-resolution frames.
+- Manifest-driven preview generator.
+- Pixel-lock-first preview mode for complex visual designs.
+- Visual similarity checks and auto-tune fallback.
+- MCP-style stdio server exposing `figma.sync`, `figma.analyze`, and `figma.generatePreview`.
+- Experimental frontend-to-Figma import bridge.
+
+## Project status
+
+This is an experimental developer tool. The pixel-lock preview path is the most reliable path for visual fidelity. Full editable code reconstruction is intentionally treated as a progressive enhancement, because browser rendering will not always match Figma's rendering engine exactly.
 
 ## Requirements
 
@@ -18,27 +67,50 @@ Classic Figma-to-code tools often translate only the node JSON. That misses Figm
 - A Figma Personal Access Token
 - Access to the Figma file you want to export
 
-## Quick Start
+## Quick start
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/francoyeoh7/figma-pixel-bridge.git
 cd figma-pixel-bridge
 cp .env.example .env.local
-# Fill FIGMA_TOKEN and FIGMA_URL in .env.local
+```
+
+Edit `.env.local`:
+
+```bash
+FIGMA_TOKEN=your_figma_personal_access_token
+FIGMA_URL=https://www.figma.com/design/FILE_KEY/FILE_NAME?node-id=0-1
+FIGMA_VISUAL_THRESHOLD=95
+```
+
+Run the pipeline:
+
+```bash
 npm test
 npm run sync
+npm run auto-tune
 npm run serve
 ```
 
-Open the preview:
+Open:
 
 ```text
 http://localhost:4173/
 ```
 
-## CLI
+## CLI usage
 
-You can use the npm scripts or the packaged CLI:
+NPM scripts:
+
+```bash
+npm run sync          # Fetch Figma data, export assets, generate preview
+npm run serve         # Serve generated/figma-preview on localhost:4173
+npm run plugin-bridge # Start the local Figma plugin bridge on localhost:4758
+npm run auto-tune     # Run visual self-check and pixel-lock fallback
+npm run mcp           # Start the MCP-style stdio server
+```
+
+Direct CLI:
 
 ```bash
 node scripts/figma-pixel.mjs sync --url "https://www.figma.com/design/...?...node-id=0-1"
@@ -49,7 +121,7 @@ node scripts/figma-pixel.mjs auto-tune --threshold 95
 node scripts/figma-pixel.mjs mcp
 ```
 
-If installed globally or used through `npx`, the same commands are available as:
+Packaged binary names:
 
 ```bash
 figma-pixel sync --url "https://www.figma.com/design/...?...node-id=0-1"
@@ -59,45 +131,32 @@ figma-pixel auto-tune
 figma-pixel mcp
 ```
 
-## Environment
+## Output structure
 
-Create `.env.local` from `.env.example`:
+`npm run sync` creates runtime output that is intentionally ignored by git:
 
-```bash
-FIGMA_TOKEN=your_figma_personal_access_token
-FIGMA_URL=https://www.figma.com/design/FILE_KEY/FILE_NAME?node-id=0-1
-FIGMA_FILE_KEY=
-FIGMA_NODE_ID=
-FIGMA_VISUAL_THRESHOLD=95
+```text
+public/figma-assets/
+  design-manifest.json
+  sync-summary.json
+  images/
+  icons/
+  frames/
+
+generated/figma-preview/
+  index.html
+  design-manifest.json
+
+reports/figma-visual-diff/
+  report.md
+  baseline.png
+  actual.png
+  diff.png
 ```
 
-`.env.local` is ignored by git. Do not commit tokens.
+## Figma plugin workflow
 
-## Outputs
-
-`npm run sync` writes:
-
-- `public/figma-assets/design-manifest.json` - normalized Figma data.
-- `public/figma-assets/images/` - original image fills.
-- `public/figma-assets/icons/` - SVG vector/icon exports.
-- `public/figma-assets/frames/` - high-resolution frame exports.
-- `generated/figma-preview/index.html` - runnable local preview.
-- `public/figma-assets/sync-summary.json` - export summary.
-
-These runtime outputs are ignored by default so each user can generate them from their own Figma file.
-
-## Figma API flow
-
-```bash
-npm run sync
-npm run serve
-```
-
-This is the fastest path when the Figma API is not rate-limited.
-
-## Figma plugin fallback
-
-Use this when the Figma API is rate-limited or when you want the most faithful selected-frame export from inside Figma:
+Use this path when the REST API is rate-limited or when you want to export the current Figma selection from inside Figma.
 
 ```bash
 npm run plugin-bridge
@@ -105,12 +164,12 @@ npm run plugin-bridge
 
 Then in Figma:
 
-1. Open `Plugins > Development > Import plugin from manifest...`
-2. Select `figma-plugin/manifest.json`
-3. Run **Figma Pixel Bridge Exporter**
-4. Select a frame or export the page's top-level frames
+1. Open `Plugins > Development > Import plugin from manifest...`.
+2. Select `figma-plugin/manifest.json`.
+3. Run **Figma Pixel Bridge Exporter**.
+4. Select a frame or export the page's top-level frames.
 
-The local bridge receives the plugin payload, writes assets, generates the preview, and updates the manifest.
+The bridge receives the plugin payload, writes local assets, updates the manifest, and regenerates the preview.
 
 ## MCP-style server
 
@@ -120,11 +179,13 @@ Start the stdio server:
 npm run mcp
 ```
 
-It exposes these tools:
+Available tools:
 
-- `figma.sync`
-- `figma.analyze`
-- `figma.generatePreview`
+| Tool | Purpose |
+| --- | --- |
+| `figma.sync` | Fetch Figma data, export assets, and generate preview files. |
+| `figma.analyze` | Fetch and normalize Figma data without binary asset downloads. |
+| `figma.generatePreview` | Regenerate preview HTML from the latest manifest. |
 
 Example JSON-RPC request:
 
@@ -132,43 +193,43 @@ Example JSON-RPC request:
 {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
 ```
 
-## Visual self-check
+## Security notes
 
-After a sync/plugin export:
+- Keep Figma tokens in `.env.local`; never commit them.
+- Runtime exports can contain private design assets, so `public/figma-assets/`, `generated/`, and `reports/` are ignored by default.
+- The plugin bridge only listens locally and is intended for trusted development machines.
+- If a token is pasted into a chat, screenshot, or public repo by mistake, revoke it in Figma and create a new one.
 
-```bash
-npm run auto-tune
+## Limitations
+
+- Pixel-lock mode preserves visual fidelity, but it is not the same as fully editable production UI code.
+- Editable reconstruction can drift for complex masks, blend modes, text antialiasing, effects, and responsive behavior.
+- The Figma REST API can be rate-limited; use the plugin bridge fallback when needed.
+- The generated preview is a local artifact, not a complete application framework integration.
+
+## Repository layout
+
+```text
+scripts/
+  figma-pixel.mjs              # CLI entrypoint
+  figma-sync.mjs               # Figma API sync pipeline
+  figma-plugin-bridge.mjs      # Local bridge for Figma plugin export
+  figma-mcp-server.mjs         # MCP-style stdio server
+  figma-tools/                 # Analyzer, API client, preview, visual diff
+
+figma-plugin/                  # Figma exporter plugin
+figma-importer-plugin/         # Experimental reverse importer plugin
+docs/                          # Architecture and workflow docs
+tests/                         # Node test suite
 ```
 
-The visual checker compares the generated preview target with the exported Figma frame. If the editable reconstruction is under the threshold, the preview stays in pixel-lock-first mode so visual fidelity remains high.
-
-## Frontend to Figma importer
-
-This repository also contains an experimental reverse bridge for importing local `.pen`/frontend design data back into Figma:
-
-```bash
-npm run figma:import-bridge
-```
-
-Then install `figma-importer-plugin/manifest.json` in Figma and run **Figma Pixel Bridge Importer**.
-
-## GitHub upload checklist
-
-Before pushing:
+## Development
 
 ```bash
 npm test
 npm run pack:dry
-git status --short
 ```
 
-Make sure these are not committed:
+## License
 
-- `.env.local`
-- `.figma-cache/`
-- `public/figma-assets/`
-- `generated/`
-- `reports/`
-- root-level one-off screenshots
-
-If a real Figma token was ever pasted into a chat, screenshot, or committed file, revoke it in Figma and create a new token before sharing the repo.
+MIT. See [`LICENSE`](LICENSE).

@@ -46,5 +46,13 @@
     "design-tokens",
     "visual-regression",
     "pixel-perfect"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/francoyeoh7/figma-pixel-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/francoyeoh7/figma-pixel-bridge/issues"
+  },
+  "homepage": "https://github.com/francoyeoh7/figma-pixel-bridge#readme"
 }
