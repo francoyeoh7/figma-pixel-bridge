@@ -1,16 +1,17 @@
 # Architecture
 
-Figma Pixel Bridge is a local, high-fidelity Figma-to-frontend pipeline. It is designed around one principle: Figma's rendered frame export is the visual source of truth, while the node tree provides structure, metadata, and interaction targets.
+Figma Pixel Bridge is a local, bidirectional design-to-code bridge. The primary path exports Figma frames into high-fidelity frontend previews. The reverse path imports local frontend/Pencil design data back into Figma as editable nodes. The system is designed around one principle: Figma's rendered frame export is the visual source of truth, while the node tree provides structure, metadata, and interaction targets.
 
 ## Goals
 
 - Extract enough Figma structure for AI agents and developers to understand the UI.
 - Export assets at high enough quality to avoid blurred backgrounds, icons, and character art.
 - Produce a runnable local preview quickly.
+- Import local frontend/Pencil design data back into Figma when needed.
 - Preserve visual parity even when editable HTML/CSS reconstruction is imperfect.
 - Provide a repeatable visual self-check instead of relying only on manual inspection.
 
-## Pipeline
+## Forward pipeline: Figma to frontend
 
 ```mermaid
 flowchart LR
@@ -27,6 +28,18 @@ flowchart LR
   H --> I[Visual diff report]
   I --> J[Auto tune / pixel-lock fallback]
 ```
+
+## Reverse pipeline: frontend to Figma
+
+```mermaid
+flowchart LR
+  A[Local frontend or Pencil data] --> B[Frontend payload bridge]
+  B --> C[Importer plugin]
+  C --> D[Figma page]
+  D --> E[Editable frames and layers]
+```
+
+The reverse path is intentionally marked experimental. It is useful for taking generated or locally maintained UI structure and recreating it inside a Figma file, but it does not claim perfect visual parity with browser output.
 
 ## Main components
 
@@ -74,6 +87,10 @@ The asset pipeline writes local files for:
 
 `figma-verify.mjs` compares image outputs and writes a visual report. `figma-auto-tune.mjs` keeps the preview in pixel-lock-first mode when editable reconstruction falls below the configured threshold.
 
+### Frontend-to-Figma importer
+
+`frontend-to-figma-bridge.mjs` serves a local payload, and `figma-importer-plugin/` consumes it inside Figma to create editable frames. This gives the project a second direction: frontend/Pencil data can flow back into Figma for further design work.
+
 ## Why this differs from plain node-to-code conversion
 
 Plain node extraction is useful but incomplete. It can lose information at the render boundary: image crop behavior, vector export details, masks, blend modes, shadows, text antialiasing, and Figma's own effect compositing.
@@ -83,12 +100,19 @@ Figma Pixel Bridge treats the exported Figma frame as the fidelity anchor. The g
 ## Data flow
 
 ```text
-.env.local / CLI args
-  -> Figma config
-  -> API sync or plugin bridge
-  -> public/figma-assets/design-manifest.json
-  -> generated/figma-preview/index.html
-  -> reports/figma-visual-diff/report.md
+Forward:
+  .env.local / CLI args
+    -> Figma config
+    -> API sync or plugin bridge
+    -> public/figma-assets/design-manifest.json
+    -> generated/figma-preview/index.html
+    -> reports/figma-visual-diff/report.md
+
+Reverse:
+  local frontend/Pencil data
+    -> frontend-to-figma bridge
+    -> Figma importer plugin
+    -> editable Figma frames
 ```
 
 ## Security model

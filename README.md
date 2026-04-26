@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-experimental-orange.svg)](#project-status)
 
-Figma Pixel Bridge is a local Figma-to-frontend pipeline for generating high-fidelity, previewable UI from Figma frames. It combines structured Figma metadata with high-resolution frame exports, so AI agents and developers can work from both the design tree and the visual source of truth.
+Figma Pixel Bridge is a local, bidirectional design bridge for moving between Figma and frontend code. It generates high-fidelity, previewable UI from Figma frames, and it also includes an experimental reverse bridge that can create editable Figma frames from local frontend/Pencil design data. It combines structured Figma metadata with high-resolution frame exports, so AI agents and developers can work from both the design tree and the visual source of truth.
 
-Unlike pure "Figma JSON to divs" converters, this project uses a hybrid rendering strategy: keep an exact pixel-lock layer for visual parity, then layer editable reconstruction, assets, hotspots, route transitions, and visual regression checks on top.
+Unlike pure "Figma JSON to divs" converters, this project uses a hybrid rendering strategy: keep an exact pixel-lock layer for visual parity, then layer editable reconstruction, assets, hotspots, route transitions, and visual regression checks on top. The reverse path uses a local bridge and Figma plugin to turn frontend/Pencil payloads back into editable Figma nodes.
 
 ## Why it exists
 
@@ -15,6 +15,7 @@ Figma-to-code workflows usually fail in the last 20%: image crops drift, icons b
 It is useful when you need to:
 
 - Export a Figma frame into a runnable local preview.
+- Send local frontend/Pencil design data back into Figma as editable frames.
 - Preserve sharp images, SVG icons, and full-frame visual fidelity.
 - Give an AI coding agent structured design context and local assets.
 - Validate output against an exported Figma reference.
@@ -55,7 +56,7 @@ See [`docs/architecture.md`](docs/architecture.md) for a deeper technical breakd
 - Pixel-lock-first preview mode for complex visual designs.
 - Visual similarity checks and auto-tune fallback.
 - MCP-style stdio server exposing `figma.sync`, `figma.analyze`, and `figma.generatePreview`.
-- Experimental frontend-to-Figma import bridge.
+- Bidirectional workflow: Figma-to-preview export plus experimental frontend/Pencil-to-Figma import.
 
 ## Project status
 
@@ -154,7 +155,7 @@ reports/figma-visual-diff/
   diff.png
 ```
 
-## Figma plugin workflow
+## Figma to frontend workflow
 
 Use this path when the REST API is rate-limited or when you want to export the current Figma selection from inside Figma.
 
@@ -170,6 +171,23 @@ Then in Figma:
 4. Select a frame or export the page's top-level frames.
 
 The bridge receives the plugin payload, writes local assets, updates the manifest, and regenerates the preview.
+
+## Frontend to Figma workflow
+
+The reverse bridge is experimental, but it is important to the project direction: local frontend/Pencil design data can be served as a payload and imported into the current Figma file as editable nodes.
+
+```bash
+npm run figma:import-bridge
+```
+
+Then in Figma:
+
+1. Open `Plugins > Development > Import plugin from manifest...`.
+2. Select `figma-importer-plugin/manifest.json`.
+3. Run **Figma Pixel Bridge Importer**.
+4. Import the local payload into a new page or the current file.
+
+This makes the project a two-way bridge rather than only a Figma export tool.
 
 ## MCP-style server
 
