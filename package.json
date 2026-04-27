@@ -1,7 +1,7 @@
 {
   "name": "figma-pixel-bridge",
   "version": "0.1.0",
-  "description": "High-fidelity Figma-to-frontend bridge with pixel-lock previews, exported assets, MCP-style tools, and visual self-checks.",
+  "description": "High-fidelity Figma-to-frontend bridge with pixel-lock previews, local plugin export, MCP-compatible tools, and visual self-checks.",
   "type": "module",
   "license": "MIT",
   "engines": {

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { parseFigmaTarget, figmaNodeIdToFileName } from '../scripts/figma-tools/figma-api.mjs';
+import { figmaApiRateLimitMessage, parseFigmaTarget, figmaNodeIdToFileName } from '../scripts/figma-tools/figma-api.mjs';
+import { isFreshFigmaSnapshot } from '../scripts/figma-sync.mjs';
 import {
   collectAssetCandidates,
   figmaColorToCss,
@@ -24,6 +25,33 @@ test('parseFigmaTarget extracts file key and node id from design URLs', () => {
 
 test('figmaNodeIdToFileName creates filesystem-safe deterministic names', () => {
   assert.equal(figmaNodeIdToFileName('12:345;7'), '12-345-7');
+});
+
+test('figmaApiRateLimitMessage separates REST API quota from plugin bridge availability', () => {
+  const message = figmaApiRateLimitMessage(180);
+
+  assert.match(message, /Figma REST API rate limit reached/);
+  assert.match(message, /token-based REST sync path/);
+  assert.match(message, /local Figma Pixel Bridge plugin workflow/);
+  assert.match(message, /npm run plugin-bridge/);
+  assert.match(message, /180 seconds/);
+});
+
+test('isFreshFigmaSnapshot only reuses assets for the same Figma revision', () => {
+  assert.equal(
+    isFreshFigmaSnapshot(
+      { key: 'file123', lastModified: '2026-04-27T00:00:00Z', version: 'v1' },
+      { key: 'file123', lastModified: '2026-04-27T00:00:00Z', version: 'v1' },
+    ),
+    true,
+  );
+  assert.equal(
+    isFreshFigmaSnapshot(
+      { key: 'file123', lastModified: '2026-04-27T00:00:00Z', version: 'v1' },
+      { key: 'file123', lastModified: '2026-04-27T00:01:00Z', version: 'v2' },
+    ),
+    false,
+  );
 });
 
 test('figmaColorToCss converts Figma RGBA paint to CSS rgba with rounded channels', () => {
@@ -156,6 +184,209 @@ test('generatePreviewHtml emits a local asset backed preview document', () => {
   assert.match(html, /<main class="figma-stage"/);
   assert.match(html, /public\/figma-assets\/images\/hero.png/);
   assert.match(html, /data-figma-id="hero"/);
+});
+
+test('generatePreviewHtml lazy loads inactive exact frame exports without lowering pixel-lock quality', () => {
+  const html = generatePreviewHtml({
+    fileKey: 'file123',
+    root: { id: 'home', name: '1 部署总览', size: { width: 1440, height: 900 } },
+    screens: [
+      {
+        id: 'home',
+        name: '1 部署总览',
+        root: { id: 'home', name: '1 部署总览', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/home@4x.png' } },
+        nodes: [{ id: 'home', name: '1 部署总览', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' }],
+      },
+      {
+        id: 'inventory',
+        name: '3 战备高墙',
+        root: { id: 'inventory', name: '3 战备高墙', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/inventory@4x.png' } },
+        nodes: [{ id: 'inventory', name: '3 战备高墙', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' }],
+      },
+    ],
+    summary: { colors: ['#020406'], typography: [], radii: [], components: [] },
+  });
+
+  assert.match(html, /<img src="\.\.\/\.\.\/public\/figma-assets\/frames\/home@4x\.png"[^>]*fetchpriority="high"/);
+  assert.match(html, /<img data-src="\.\.\/\.\.\/public\/figma-assets\/frames\/inventory@4x\.png"[^>]*loading="lazy"/);
+  assert.doesNotMatch(html, /<img src="\.\.\/\.\.\/public\/figma-assets\/frames\/inventory@4x\.png"/);
+  assert.match(html, /loadExactLayer/);
+  assert.match(html, /preloadRoute/);
+});
+
+test('generatePreviewHtml only auto-enhances clickable-looking surfaces when requested and adapts motion profile', () => {
+  const baseManifest = {
+    fileKey: 'file123',
+    root: { id: 'root', name: 'METAWAR 枪匠系统', size: { width: 1440, height: 900 } },
+    nodes: [
+      { id: 'root', name: 'METAWAR 枪匠系统', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' },
+      { id: 'button', name: 'module card button', type: 'FRAME', box: { x: 100, y: 100, width: 180, height: 64 } },
+    ],
+    summary: { colors: ['#020406'], typography: [], radii: [], components: [] },
+  };
+
+  const quietHtml = generatePreviewHtml(baseManifest);
+  const enhancedHtml = generatePreviewHtml({
+    ...baseManifest,
+    preview: { autoInteractions: true },
+  });
+
+  assert.doesNotMatch(quietHtml, /class="hotspot feedback-hotspot"/);
+  assert.match(enhancedHtml, /<body class="mode-exact auto-interactions interaction-profile-game"/);
+  assert.match(enhancedHtml, /data-feedback="true"[^>]*data-action="module card button"/);
+});
+
+test('generatePreviewHtml maps gunsmith detail screens and accessory hotspots', () => {
+  const html = generatePreviewHtml({
+    fileKey: 'file123',
+    root: { id: 'loadout', name: '02 枪匠系统 - Pencil编辑版', size: { width: 1440, height: 900 } },
+    screens: [
+      {
+        id: 'loadout',
+        name: '02 枪匠系统 - Pencil编辑版',
+        root: { id: 'loadout', name: '02 枪匠系统 - Pencil编辑版', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/loadout.png' } },
+        nodes: [
+          { id: 'loadout', name: '02 枪匠系统 - Pencil编辑版', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' },
+          { id: 'accessories-button', name: '右侧按钮 ACCESSORIES', type: 'FRAME', box: { x: 1180, y: 248, width: 190, height: 46 } },
+        ],
+      },
+      {
+        id: 'detail',
+        name: '2.1 枪匠系统 - 详细改造',
+        root: { id: 'detail', name: '2.1 枪匠系统 - 详细改造', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/detail.png' } },
+        nodes: [
+          { id: 'detail', name: '2.1 枪匠系统 - 详细改造', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' },
+          { id: 'scope1-slot', name: 'Frame 107', type: 'FRAME', box: { x: 1180, y: 320, width: 80, height: 105 } },
+          { id: 'scope1-label', name: 'SCOPE1', type: 'TEXT', text: 'SCOPE1', box: { x: 1193, y: 320, width: 54, height: 25 } },
+          { id: 'scope1-thumb', name: 'Frame 84', type: 'FRAME', box: { x: 1180, y: 345, width: 80, height: 80 } },
+        ],
+      },
+      {
+        id: 'legacy-selected',
+        name: '2.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件',
+        root: { id: 'legacy-selected', name: '2.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/legacy-selected.png' } },
+        nodes: [
+          { id: 'legacy-selected', name: '2.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' },
+        ],
+      },
+      {
+        id: 'selected',
+        name: '2.2 枪匠系统 - 详细改造 - 选中配件',
+        root: { id: 'selected', name: '2.2 枪匠系统 - 详细改造 - 选中配件', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/selected.png' } },
+        nodes: [
+          { id: 'selected', name: '2.2 枪匠系统 - 详细改造 - 选中配件', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' },
+        ],
+      },
+    ],
+    summary: { colors: ['#020406'], typography: [], radii: [], components: [] },
+  });
+
+  assert.match(html, /data-route="gunsmith-detail"/);
+  assert.match(html, /data-route="gunsmith-selected"/);
+  assert.match(html, /data-route="gunsmith-selected-rifle"/);
+  assert.equal(html.match(/data-route="gunsmith-selected"/g)?.length, 1);
+  assert.match(html, /data-target-route="gunsmith-detail"[^>]*data-action="ACCESSORIES"/);
+  assert.match(html, /data-target-route="gunsmith-selected"[^>]*data-action="SCOPE1"[^>]*data-transition="scope-reveal"[^>]*left:1172px;top:312px;width:96px;height:121px/);
+  assert.match(html, /scope-reveal-overlay/);
+  assert.match(html, /scopeRevealTransition/);
+  assert.match(html, /stateRevealTransition/);
+  assert.match(html, /smart-morph-overlay/);
+  assert.match(html, /smartMorphTransition/);
+  assert.doesNotMatch(html, /scope-reference\.mp4/);
+  assert.doesNotMatch(html, /videoRouteTransition/);
+  assert.doesNotMatch(html, /video-transition-overlay/);
+});
+
+test('generatePreviewHtml maps top nav by labels instead of frame order', () => {
+  const html = generatePreviewHtml({
+    fileKey: 'file123',
+    root: { id: 'home', name: '1 部署总览', size: { width: 1440, height: 900 } },
+    screens: [
+      {
+        id: 'home',
+        name: '1 部署总览',
+        root: { id: 'home', name: '1 部署总览', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/home.png' } },
+        nodes: [
+          { id: 'home', name: '1 部署总览', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' },
+          { id: 'nav-container', name: 'Frame 5', type: 'FRAME', box: { x: 100, y: 40, width: 600, height: 36 } },
+          { id: 'nav-play-frame', name: 'Frame 1', type: 'FRAME', box: { x: 100, y: 40, width: 150, height: 36 } },
+          { id: 'nav-armament-frame', name: 'Frame 2', type: 'FRAME', box: { x: 250, y: 40, width: 150, height: 36 } },
+          { id: 'nav-warehouse-frame', name: 'Frame 3', type: 'FRAME', box: { x: 400, y: 40, width: 150, height: 36 } },
+          { id: 'nav-store-frame', name: 'Frame 4', type: 'FRAME', box: { x: 550, y: 40, width: 150, height: 36 } },
+          { id: 'nav-play-text', name: '导航 部署总览', type: 'TEXT', text: 'Play', box: { x: 158, y: 47, width: 34, height: 22 } },
+          { id: 'nav-armament-text', name: '导航 部署总览', type: 'TEXT', text: 'Armament', box: { x: 284, y: 47, width: 82, height: 22 } },
+          { id: 'nav-warehouse-text', name: '导航 部署总览', type: 'TEXT', text: 'Warehouse', box: { x: 434, y: 47, width: 90, height: 22 } },
+          { id: 'nav-store-text', name: '导航 部署总览', type: 'TEXT', text: 'Store', box: { x: 604, y: 47, width: 42, height: 22 } },
+        ],
+      },
+      {
+        id: 'loadout',
+        name: '2 枪匠系统',
+        root: { id: 'loadout', name: '2 枪匠系统', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/loadout.png' } },
+        nodes: [{ id: 'loadout', name: '2 枪匠系统', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' }],
+      },
+      {
+        id: 'inventory',
+        name: '3 战备高墙',
+        root: { id: 'inventory', name: '3 战备高墙', type: 'FRAME', size: { width: 1440, height: 900 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/inventory.png' } },
+        nodes: [{ id: 'inventory', name: '3 战备高墙', type: 'FRAME', box: { x: 0, y: 0, width: 1440, height: 900 }, fill: '#020406' }],
+      },
+    ],
+    summary: { colors: ['#020406'], typography: [], radii: [], components: [] },
+  });
+
+  assert.match(html, /data-target-route="loadout"[^>]*data-action="armament"[^>]*left:250px/);
+  assert.match(html, /data-target-route="inventory"[^>]*data-action="warehouse"[^>]*left:400px/);
+  assert.doesNotMatch(html, /data-kind="nav"[^>]*left:100px;top:40px;width:600px/);
+});
+
+test('generatePreviewHtml links selected scope screen to rifle detail variant without MP4 transition', () => {
+  const html = generatePreviewHtml({
+    fileKey: 'file123',
+    root: { id: 'selected', name: '2.2 枪匠系统 - 详细改造 - 选中配件', size: { width: 1920, height: 1080 } },
+    screens: [
+      {
+        id: 'selected',
+        name: '2.2 枪匠系统 - 详细改造 - 选中配件',
+        root: { id: 'selected', name: '2.2 枪匠系统 - 详细改造 - 选中配件', type: 'FRAME', size: { width: 1920, height: 1080 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/selected.png' } },
+        nodes: [
+          { id: 'selected', name: '2.2 枪匠系统 - 详细改造 - 选中配件', type: 'FRAME', box: { x: 0, y: 0, width: 1920, height: 1080 }, fill: '#020406' },
+          { id: 'card-1', name: 'Frame 79', type: 'FRAME', box: { x: 65, y: 904, width: 259, height: 127 } },
+          { id: 'text-1', name: 'From the loot box', type: 'TEXT', text: 'fully automatic rifle', box: { x: 65, y: 1006, width: 259, height: 25 } },
+          { id: 'card-2', name: 'Frame 80', type: 'FRAME', box: { x: 338, y: 904, width: 260, height: 127 } },
+          { id: 'text-2', name: 'From the loot box', type: 'TEXT', text: 'fully automatic rifle', box: { x: 338, y: 1006, width: 260, height: 25 } },
+        ],
+      },
+      {
+        id: 'rifle',
+        name: '2.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件',
+        root: { id: 'rifle', name: '2.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件', type: 'FRAME', size: { width: 1920, height: 1080 } },
+        exactExports: { png: { publicPath: '../../public/figma-assets/frames/rifle.png' } },
+        nodes: [
+          { id: 'rifle', name: '2.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件', type: 'FRAME', box: { x: 0, y: 0, width: 1920, height: 1080 }, fill: '#020406' },
+        ],
+      },
+    ],
+    summary: { colors: ['#020406'], typography: [], radii: [], components: [] },
+  });
+
+  assert.match(html, /data-route="gunsmith-selected-rifle"/);
+  assert.match(html, /data-name="2\.3 枪匠系统 - 详细改造 - 选中配件 - 选中适配配件"/);
+  assert.match(html, /data-target-route="gunsmith-selected-rifle"[^>]*data-action="fully automatic rifle1"[^>]*data-transition="state-reveal"[^>]*left:55px;top:894px;width:279px;height:147px/);
+  assert.doesNotMatch(html, /data-transition="rifle-mp4"/);
+  assert.doesNotMatch(html, /scope-reference\.mp4/);
+  assert.doesNotMatch(html, /videoRouteTransition/);
+  assert.doesNotMatch(html, /<video/);
 });
 
 import {

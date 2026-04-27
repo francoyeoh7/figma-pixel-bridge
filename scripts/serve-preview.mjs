@@ -19,6 +19,7 @@ const contentTypes = {
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
   '.gif': 'image/gif',
+  '.mp4': 'video/mp4',
 };
 
 const server = http.createServer(async (request, response) => {
@@ -33,7 +34,38 @@ const server = http.createServer(async (request, response) => {
   try {
     const fileStat = await stat(filePath);
     if (!fileStat.isFile()) throw new Error('Not a file');
-    response.writeHead(200, { 'Content-Type': contentTypes[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream' });
+    const contentType = contentTypes[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+    const headers = {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-store, max-age=0',
+      Pragma: 'no-cache',
+      Expires: '0',
+      'Accept-Ranges': 'bytes',
+    };
+    const range = request.headers.range;
+
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (!match) {
+        response.writeHead(416, headers).end();
+        return;
+      }
+      const start = match[1] ? Number(match[1]) : 0;
+      const end = match[2] ? Number(match[2]) : fileStat.size - 1;
+      if (start >= fileStat.size || end >= fileStat.size || start > end) {
+        response.writeHead(416, { ...headers, 'Content-Range': `bytes */${fileStat.size}` }).end();
+        return;
+      }
+      response.writeHead(206, {
+        ...headers,
+        'Content-Length': String(end - start + 1),
+        'Content-Range': `bytes ${start}-${end}/${fileStat.size}`,
+      });
+      createReadStream(filePath, { start, end }).pipe(response);
+      return;
+    }
+
+    response.writeHead(200, { ...headers, 'Content-Length': String(fileStat.size) });
     createReadStream(filePath).pipe(response);
   } catch {
     response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end(`Not found: ${pathname}`);

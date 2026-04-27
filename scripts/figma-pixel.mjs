@@ -23,6 +23,9 @@ try {
       token: options.token,
       downloadAssets: options.assets !== false,
       generatePreview: options.preview !== false,
+      reuseCachedAssets: options.cache !== false,
+      autoInteractions: options.autoInteractions === true,
+      interactionProfile: options.interactionProfile,
     });
     console.log(JSON.stringify(summary, null, 2));
   } else if (command === 'verify') {
@@ -110,8 +113,12 @@ function parseOptions(argv) {
     else if (arg === '--report-dir') options.reportDir = next();
     else if (arg === '--dir') options.dir = next();
     else if (arg === '--port') options.port = Number(next());
+    else if (arg === '--interaction-profile') options.interactionProfile = next();
+    else if (arg === '--auto-interactions') options.autoInteractions = true;
+    else if (arg === '--no-auto-interactions') options.autoInteractions = false;
     else if (arg === '--no-assets') options.assets = false;
     else if (arg === '--no-preview') options.preview = false;
+    else if (arg === '--no-cache') options.cache = false;
     else if (arg.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
   }
   return options;
@@ -122,6 +129,7 @@ function printHelp() {
 
 Usage:
   figma-pixel sync --url <figma-url> [--node-id 0:1]
+  figma-pixel sync --url <figma-url> --auto-interactions [--interaction-profile game|social|product]
   figma-pixel serve [--port 4173]
   figma-pixel plugin-bridge [--port 4758]
   figma-pixel verify [--threshold 95]
@@ -138,5 +146,9 @@ Outputs:
   public/figma-assets/             normalized manifest and exported assets
   generated/figma-preview/         runnable preview HTML
   reports/figma-visual-diff/       visual comparison report
+
+Performance:
+  Sync reuses local 4x PNG/SVG/image exports when the Figma file revision is unchanged.
+  Use --no-cache to force fresh asset exports.
 `);
 }

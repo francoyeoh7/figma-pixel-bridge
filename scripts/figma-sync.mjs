@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -37,8 +37,10 @@ export async function runFigmaSync(options = {}) {
   await mkdir(output.assetsDir, { recursive: true });
   await mkdir(output.previewDir, { recursive: true });
 
+  const previousFileJson = await readJsonIfExists(output.rawFileJson);
   log(options, `Fetching Figma file ${config.fileKey}${config.nodeId ? ` node ${config.nodeId}` : ''}`);
   const fileJson = await fetchHydratedFileJson(config, (message) => log(options, message));
+  const canReuseCachedAssets = options.reuseCachedAssets !== false && isFreshFigmaSnapshot(previousFileJson, fileJson);
   await writeJson(output.rawFileJson, fileJson);
 
   const rootNode = pickRootNode(fileJson, config.nodeId);
@@ -51,9 +53,10 @@ export async function runFigmaSync(options = {}) {
   const assetLog = { images: [], svgs: [], frames: [] };
 
   if (options.downloadAssets !== false) {
-    await exportOriginalImageFills({ config, candidates, output, assetMap, assetLog, log: (message) => log(options, message) });
-    await exportSvgNodes({ config, candidates, output, assetMap, assetLog, log: (message) => log(options, message) });
-    await exportFramePngs({ config, rootNode, candidates, output, assetMap, assetLog, log: (message) => log(options, message) });
+    if (canReuseCachedAssets) log(options, 'Reusing unchanged local Figma asset exports');
+    await exportOriginalImageFills({ config, candidates, output, assetMap, assetLog, canReuseCachedAssets, log: (message) => log(options, message) });
+    await exportSvgNodes({ config, candidates, output, assetMap, assetLog, canReuseCachedAssets, log: (message) => log(options, message) });
+    await exportFramePngs({ config, rootNode, candidates, output, assetMap, assetLog, canReuseCachedAssets, log: (message) => log(options, message) });
   }
 
   const manifest = analyzeFigmaDocument(fileJson, {
@@ -68,6 +71,11 @@ export async function runFigmaSync(options = {}) {
     nodeId: config.nodeId || rootNode.id,
   };
   manifest.exports = assetLog;
+  manifest.preview = {
+    ...(manifest.preview ?? {}),
+    ...(options.autoInteractions ? { autoInteractions: true } : {}),
+    ...(options.interactionProfile ? { interactionProfile: options.interactionProfile } : {}),
+  };
 
   await writeJson(output.manifestJson, manifest);
   await writeJson(output.previewManifestJson, manifest);
@@ -95,6 +103,9 @@ export async function runFigmaSync(options = {}) {
       imagesDownloaded: assetLog.images.length,
       svgsDownloaded: assetLog.svgs.length,
       framesDownloaded: assetLog.frames.length,
+      cachedAssetsReused: assetLog.images.filter((asset) => asset.cached).length
+        + assetLog.svgs.filter((asset) => asset.cached).length
+        + assetLog.frames.filter((asset) => asset.cached).length,
     },
   };
 
@@ -168,16 +179,33 @@ function createOutputPaths(cwd, config) {
   };
 }
 
-async function exportOriginalImageFills({ config, candidates, output, assetMap, assetLog, log }) {
+async function exportOriginalImageFills({ config, candidates, output, assetMap, assetLog, canReuseCachedAssets = false, log }) {
   if (!candidates.imageRefs.length) return;
-  log(`Downloading ${candidates.imageRefs.length} original image fill(s)`);
+  const pending = [];
+
+  for (const image of candidates.imageRefs) {
+    const baseName = `${assetFileBase(image.nodeId, image.nodeName)}-${image.imageRef.slice(0, 8)}`;
+    if (canReuseCachedAssets) {
+      const cached = await findCachedFileByBase(output.imagesDir, baseName);
+      if (cached) {
+        const publicPath = `../../public/figma-assets/images/${path.basename(cached.path)}`;
+        const asset = { kind: 'image', imageRef: image.imageRef, nodeId: image.nodeId, publicPath, bytes: cached.bytes, cached: true };
+        assetMap.set(`image:${image.imageRef}`, asset);
+        assetLog.images.push({ ...asset, path: cached.path });
+        continue;
+      }
+    }
+    pending.push({ image, baseName });
+  }
+
+  if (!pending.length) return;
+  log(`Downloading ${pending.length} original image fill(s)`);
   const imageFillResponse = await getFigmaImageFills(config);
   const urls = imageFillResponse?.meta?.images ?? imageFillResponse?.images ?? {};
 
-  for (const image of candidates.imageRefs) {
+  for (const { image, baseName } of pending) {
     const url = urls[image.imageRef];
     if (!url) continue;
-    const baseName = `${assetFileBase(image.nodeId, image.nodeName)}-${image.imageRef.slice(0, 8)}`;
     const tempPath = path.join(output.imagesDir, `${baseName}.download`);
     const info = await downloadUrlToFile(url, tempPath);
     const ext = extensionFromContentType(info.contentType, '.png');
@@ -192,10 +220,25 @@ async function exportOriginalImageFills({ config, candidates, output, assetMap, 
   }
 }
 
-async function exportSvgNodes({ config, candidates, output, assetMap, assetLog, log }) {
+async function exportSvgNodes({ config, candidates, output, assetMap, assetLog, canReuseCachedAssets = false, log }) {
   if (!candidates.svgNodes.length) return;
-  log(`Exporting ${candidates.svgNodes.length} vector/icon node(s) as SVG`);
-  for (const batch of chunk(candidates.svgNodes, 50)) {
+  const pending = [];
+  for (const node of candidates.svgNodes) {
+    const fileName = `${assetFileBase(node.nodeId, node.nodeName)}.svg`;
+    const finalPath = path.join(output.iconsDir, fileName);
+    const cached = canReuseCachedAssets ? await fileInfo(finalPath) : null;
+    if (cached) {
+      const publicPath = `../../public/figma-assets/icons/${fileName}`;
+      const asset = { kind: 'svg', nodeId: node.nodeId, publicPath, bytes: cached.bytes, cached: true };
+      assetMap.set(`svg:${node.nodeId}`, asset);
+      assetLog.svgs.push({ ...asset, path: finalPath });
+    } else {
+      pending.push(node);
+    }
+  }
+  if (!pending.length) return;
+  log(`Exporting ${pending.length} vector/icon node(s) as SVG`);
+  for (const batch of chunk(pending, 50)) {
     const exported = await exportFigmaNodes({
       fileKey: config.fileKey,
       token: config.token,
@@ -217,12 +260,27 @@ async function exportSvgNodes({ config, candidates, output, assetMap, assetLog, 
   }
 }
 
-async function exportFramePngs({ config, rootNode, candidates, output, assetMap, assetLog, log }) {
+async function exportFramePngs({ config, rootNode, candidates, output, assetMap, assetLog, canReuseCachedAssets = false, log }) {
   const frameIds = [rootNode.id, ...candidates.frameNodes.map((node) => node.nodeId)];
   const unique = [...new Set(frameIds.filter(Boolean))];
   if (!unique.length) return;
-  log(`Exporting ${unique.length} frame/root node(s) as 4x PNG`);
-  for (const batchIds of chunk(unique, 25)) {
+  const pending = [];
+  for (const nodeId of unique) {
+    const fileName = `${figmaNodeIdToFileName(nodeId)}@4x.png`;
+    const finalPath = path.join(output.framesDir, fileName);
+    const cached = canReuseCachedAssets ? await fileInfo(finalPath) : null;
+    if (cached) {
+      const publicPath = `../../public/figma-assets/frames/${fileName}`;
+      const asset = { kind: 'png', nodeId, publicPath, bytes: cached.bytes, scale: 4, cached: true };
+      assetMap.set(`png:${nodeId}`, asset);
+      assetLog.frames.push({ ...asset, path: finalPath });
+    } else {
+      pending.push(nodeId);
+    }
+  }
+  if (!pending.length) return;
+  log(`Exporting ${pending.length} frame/root node(s) as 4x PNG`);
+  for (const batchIds of chunk(pending, 25)) {
     const exported = await exportFigmaNodes({
       fileKey: config.fileKey,
       token: config.token,
@@ -243,6 +301,55 @@ async function exportFramePngs({ config, rootNode, candidates, output, assetMap,
       assetLog.frames.push({ ...asset, path: finalPath });
     }
   }
+}
+
+export function isFreshFigmaSnapshot(previousFileJson, nextFileJson) {
+  if (!previousFileJson || !nextFileJson) return false;
+  const previousKey = previousFileJson.key ?? previousFileJson.fileKey ?? '';
+  const nextKey = nextFileJson.key ?? nextFileJson.fileKey ?? '';
+  if (previousKey && nextKey && previousKey !== nextKey) return false;
+  const previousModified = previousFileJson.lastModified ?? previousFileJson.last_modified ?? '';
+  const nextModified = nextFileJson.lastModified ?? nextFileJson.last_modified ?? '';
+  const previousVersion = previousFileJson.version ?? '';
+  const nextVersion = nextFileJson.version ?? '';
+  if (previousModified && nextModified) return previousModified === nextModified && (!previousVersion || !nextVersion || previousVersion === nextVersion);
+  return Boolean(previousVersion && nextVersion && previousVersion === nextVersion);
+}
+
+async function readJsonIfExists(filePath) {
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function fileInfo(filePath) {
+  try {
+    const info = await stat(filePath);
+    return info.isFile() ? { path: filePath, bytes: info.size } : null;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function findCachedFileByBase(dir, baseName) {
+  let entries;
+  try {
+    entries = await readdir(dir);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith(`${baseName}.`) || entry.endsWith('.download')) continue;
+    const info = await fileInfo(path.join(dir, entry));
+    if (info) return info;
+  }
+  return null;
 }
 
 function chunk(items, size) {

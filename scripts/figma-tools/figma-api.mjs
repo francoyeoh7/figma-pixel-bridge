@@ -125,17 +125,27 @@ export async function figmaFetch(endpoint, { token, method = 'GET', body, baseUr
     const details = await response.text().catch(() => '');
     if (response.status === 429 && attempt < retries) {
       const retryAfterSeconds = Number(response.headers.get('retry-after') ?? 0);
-      if (retryAfterSeconds > 120) {
-        throw new Error(`Figma API rate limit exceeded. Retry-After is ${retryAfterSeconds} seconds; refusing to block the local sync for that long.`);
-      }
+      if (retryAfterSeconds > 120) throw new Error(figmaApiRateLimitMessage(retryAfterSeconds));
       const delayMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : Math.min(30_000, 1500 * 2 ** attempt);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       continue;
     }
 
+    if (response.status === 429) throw new Error(figmaApiRateLimitMessage(Number(response.headers.get('retry-after') ?? 0)));
+
     throw new Error(`Figma API request failed (${response.status}) for ${redactUrl(url)}: ${details.slice(0, 500)}`);
   }
   throw new Error(`Figma API request failed for ${redactUrl(url)}`);
+}
+
+export function figmaApiRateLimitMessage(retryAfterSeconds = 0) {
+  const wait = Number(retryAfterSeconds) > 0 ? ` Figma suggests retrying after ${Number(retryAfterSeconds)} seconds.` : '';
+  return [
+    'Figma REST API rate limit reached.',
+    'This only affects the token-based REST sync path, not the local Figma Pixel Bridge plugin workflow.',
+    'You can keep exporting without REST API quota by running `npm run plugin-bridge`, then opening the Figma Pixel Bridge Exporter plugin inside Figma.',
+    wait.trim(),
+  ].filter(Boolean).join(' ');
 }
 
 export async function getFigmaFile({ fileKey, token, geometry = 'paths', filterToNode = false, nodeId = '', depth }) {

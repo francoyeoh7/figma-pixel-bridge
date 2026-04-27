@@ -5,16 +5,24 @@
   <style>
     :root { color-scheme: dark; }
     body { margin:0; font:12px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#101216; color:#f4f7fb; }
-    .wrap { padding:18px; }
+    .wrap { padding:16px; }
     h1 { margin:0 0 8px; font-size:16px; }
-    p { margin:0 0 14px; color:#aab4c2; }
+    p { margin:0 0 10px; color:#aab4c2; }
+    .notice { margin:0 0 12px; padding:10px; border:1px solid rgba(0,240,255,.25); border-radius:10px; background:rgba(0,240,255,.07); color:#c8f8ff; }
+    .steps { display:grid; gap:8px; margin:10px 0 12px; }
+    .step { display:grid; grid-template-columns:22px 1fr; gap:8px; align-items:start; color:#cbd5e1; }
+    .step b { display:grid; place-items:center; width:22px; height:22px; border-radius:999px; background:#24313b; color:#00f0ff; font-size:11px; }
+    .step strong { display:block; color:#f4f7fb; font-size:12px; }
+    code { display:block; margin-top:3px; padding:5px 7px; border-radius:7px; background:#0b0d11; color:#dffcff; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; overflow:hidden; text-overflow:ellipsis; }
     label { display:block; margin:12px 0 5px; color:#dbe5f3; font-weight:600; }
-    input, select { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #303844; border-radius:8px; background:#171b22; color:#fff; }
+    input, select, textarea { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #303844; border-radius:8px; background:#171b22; color:#fff; }
+    textarea { height:74px; resize:none; color:#cbd5e1; font:11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     button { width:100%; margin-top:14px; border:0; border-radius:10px; padding:11px 12px; background:#00f0ff; color:#001114; font-weight:800; cursor:pointer; }
     button.secondary { background:#242b35; color:#dbe5f3; }
+    button.compact { margin-top:8px; padding:8px 10px; font-size:11px; }
     button:disabled { opacity:.45; cursor:not-allowed; }
-    .status { margin-top:14px; padding:10px; min-height:76px; border:1px solid #27303b; border-radius:10px; background:#0b0d11; color:#94a3b8; white-space:pre-wrap; overflow:auto; max-height:160px; }
+    .status { margin-top:12px; padding:10px; min-height:64px; border:1px solid #27303b; border-radius:10px; background:#0b0d11; color:#94a3b8; white-space:pre-wrap; overflow:auto; max-height:120px; }
     .ok { color:#7cffaa; } .err { color:#ff7373; }
     .hint { margin-top:12px; font-size:11px; color:#7d8a9d; }
   </style>
@@ -23,6 +31,12 @@
   <div class="wrap">
     <h1>Pixel-Lock Exporter</h1>
     <p>导出当前选中 Frame；如果没有选中，则导出当前页面所有顶层 Frame。</p>
+    <div class="notice">新手路径：先在这里导出，再让 AI 读取本地 manifest/assets 写代码。这个通道不走 Figma REST API token，也不消耗官方 MCP 调用额度。</div>
+    <div class="steps">
+      <div class="step"><b>1</b><span><strong>终端启动 Bridge</strong><code>npm run plugin-bridge</code></span></div>
+      <div class="step"><b>2</b><span><strong>选中画板后导出</strong>先检查 Bridge，再点击开始导出。</span></div>
+      <div class="step"><b>3</b><span><strong>把提示词交给 AI</strong>AI 读取本地文件后生成前端。</span></div>
+    </div>
     <label>Bridge URL</label>
     <input id="bridge" value="http://localhost:4758" />
     <div class="row">
@@ -44,6 +58,9 @@
     </div>
     <button id="start">开始导出到项目</button>
     <button id="health" class="secondary">检查本地 Bridge</button>
+    <label>导出后给 AI 的提示词</label>
+    <textarea id="prompt" readonly>请读取 public/figma-assets/design-manifest.json、public/figma-assets/frames 和 public/figma-assets/images，把刚导出的 Figma UI 转成可运行前端。优先保证 95%+ 视觉还原，图片使用 public 里的高清资产，可点击区域按 manifest/hotspots 和 UI 语义补齐。如果看到 Figma API/MCP 限额提示，不要调用官方 Figma MCP，直接使用本地 plugin bridge 已导出的文件。</textarea>
+    <button id="copyPrompt" class="secondary compact">复制提示词</button>
     <div id="status" class="status">先在终端运行：npm run plugin-bridge</div>
     <div class="hint">精确模式会导出 root SVG + root PNG + 原始图片 bytes + icon SVG，并生成可编辑重建预览。</div>
   </div>
@@ -54,6 +71,8 @@
     const bridgeEl = document.querySelector('#bridge');
     const scaleEl = document.querySelector('#scale');
     const scopeEl = document.querySelector('#scope');
+    const promptEl = document.querySelector('#prompt');
+    const copyPromptBtn = document.querySelector('#copyPrompt');
 
     function log(message, type = '') {
       const prefix = type === 'error' ? '✖ ' : type === 'ok' ? '✓ ' : '• ';
@@ -75,6 +94,17 @@
         log('Bridge ready: ' + JSON.stringify(health), 'ok');
       } catch (error) {
         log(error.message, 'error');
+      }
+    };
+
+    copyPromptBtn.onclick = async () => {
+      promptEl.select();
+      try {
+        await navigator.clipboard.writeText(promptEl.value);
+        log('提示词已复制，可以粘贴给 AI。', 'ok');
+      } catch (error) {
+        document.execCommand('copy');
+        log('提示词已选中，可以复制后粘贴给 AI。', 'ok');
       }
     };
 

@@ -1,6 +1,8 @@
-# MCP-style Figma Tools
+# Local MCP-Compatible Figma Tools
 
-This project includes a small stdio JSON-RPC/MCP-style server for local Figma-to-frontend work.
+This project includes a small stdio JSON-RPC/MCP-compatible server for local Figma-to-frontend work. It is not the official Figma MCP.
+
+If a hosted AI product says its official Figma MCP quota is exhausted, that does not mean Figma Pixel Bridge is unusable. It only means that hosted connector cannot call Figma through its own quota. You can still use the local plugin bridge, which exports from inside Figma to `localhost` and does not use Figma REST API quota.
 
 ## Setup
 
@@ -33,9 +35,9 @@ npm run mcp
 - `public/figma-assets/frames` - 4x PNG frame/root exports.
 - `generated/figma-preview/index.html` - local preview UI using local assets.
 
-## MCP-style usage
+## MCP-compatible usage
 
-The stdio server accepts JSON-RPC/MCP-style calls:
+The stdio server accepts JSON-RPC/MCP-compatible calls:
 
 - `tools/list`
 - `tools/call` with `figma.sync`
@@ -48,15 +50,15 @@ Example single-line request:
 {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
 ```
 
-## Rate-limit fallback: plugin bridge
+## Quota fallback: plugin bridge
 
-If `npm run sync` returns a Figma `429 Rate limit exceeded`, use the local plugin bridge instead:
+If `npm run sync` returns a Figma `429 Rate limit exceeded`, or if an AI client says an official Figma MCP quota is exhausted, use the local plugin bridge instead:
 
 ```bash
 npm run plugin-bridge
 ```
 
-Then install `figma-plugin/manifest.json` through Figma `Plugins > Development > Import plugin from manifest...` and run **Figma Pixel Bridge Exporter**. See `docs/figma-plugin-bridge.md` for the complete workflow.
+Then install `figma-plugin/manifest.json` through Figma `Plugins > Development > Import plugin from manifest...` and run **Figma Pixel Bridge Exporter**. This path uses the Figma plugin runtime and local `http://localhost:4758`; it does not need a Figma token. See `docs/figma-plugin-bridge.md` for the complete workflow.
 
 ## Visual self-check
 

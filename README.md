@@ -55,6 +55,9 @@ See [`docs/architecture.md`](docs/architecture.md) for a deeper technical breakd
 - Manifest-driven preview generator.
 - Pixel-lock-first preview mode for complex visual designs.
 - Visual similarity checks and auto-tune fallback.
+- Cached high-resolution asset reuse when the Figma revision has not changed.
+- Lazy loading and hover prefetch for inactive 4x frame exports.
+- Optional auto-interaction enrichment for hover, press, hotspots, and same-level smart transitions.
 - MCP-style stdio server exposing `figma.sync`, `figma.analyze`, and `figma.generatePreview`.
 - Bidirectional workflow: Figma-to-preview export plus experimental frontend/Pencil-to-Figma import.
 
@@ -65,14 +68,53 @@ This is an experimental developer tool. The pixel-lock preview path is the most 
 ## Requirements
 
 - Node.js 20+
-- A Figma Personal Access Token
 - Access to the Figma file you want to export
+- No token required for the local Figma plugin bridge path
+- A Figma Personal Access Token only if you use the REST API sync path
 
 ## Quick start
+
+### Beginner path: no token, no official MCP quota
+
+This is the recommended first run. The Figma plugin exports the selected frame to local files, then your AI coding tool reads those files from this project folder.
 
 ```bash
 git clone https://github.com/francoyeoh7/figma-pixel-bridge.git
 cd figma-pixel-bridge
+npm install
+npm run plugin-bridge
+```
+
+In Figma:
+
+1. Open `Plugins > Development > Import plugin from manifest...`.
+2. Select `figma-plugin/manifest.json`.
+3. Run **Figma Pixel Bridge Exporter**.
+4. Select a frame, click **检查本地 Bridge**, then click **开始导出到项目**.
+
+After export, open this project folder in your AI coding tool and say:
+
+```text
+请读取 public/figma-assets/design-manifest.json、public/figma-assets/frames 和 public/figma-assets/images，把刚导出的 Figma UI 转成可运行前端。优先保证 95%+ 视觉还原，图片使用 public 里的高清资产，可点击区域按 manifest/hotspots 和 UI 语义补齐。如果看到 Figma API/MCP 限额提示，不要调用官方 Figma MCP，直接使用本地 plugin bridge 已导出的文件。
+```
+
+Preview the generated output:
+
+```bash
+npm run serve
+```
+
+Open:
+
+```text
+http://localhost:4173/
+```
+
+### REST API path: optional
+
+Use this path when you want automated Figma REST API sync and have a Figma token available:
+
+```bash
 cp .env.example .env.local
 ```
 
@@ -99,6 +141,38 @@ Open:
 http://localhost:4173/
 ```
 
+## How beginners should use it with AI
+
+The plugin does not magically run an AI model by itself. It prepares the design data that an AI coding agent needs: manifest, images, icons, high-resolution frame exports, routes, and hotspots.
+
+Think of the workflow as:
+
+```text
+Figma plugin export -> local manifest/assets -> AI coding tool -> runnable frontend
+```
+
+Good starter prompts:
+
+```text
+把刚导出的 Figma UI 转成 React/Vite 页面。读取 public/figma-assets/design-manifest.json 和 public/figma-assets 下的图片、图标、frames。先保证视觉还原，再补交互。
+```
+
+```text
+基于已有预览继续优化：保留高清 frame/pixel-lock 兜底层，把看起来可点击的区域补上 hover、press、路由跳转和同级智能动画，风格要匹配原 UI。
+```
+
+```text
+如果官方 Figma API 或 MCP 报额度不足，不要停。这个项目已经通过本地插件桥接导出了文件，请直接使用本地 manifest/assets。
+```
+
+For the reverse direction, tell the AI:
+
+```text
+把当前前端页面整理成 Figma import payload，然后通过本地 figma:import-bridge 导入到当前 Figma 文件。尽量保留文字、图片、颜色、圆角、尺寸和层级。
+```
+
+See [`docs/getting-started.md`](docs/getting-started.md) for the full beginner guide.
+
 ## CLI usage
 
 NPM scripts:
@@ -115,6 +189,7 @@ Direct CLI:
 
 ```bash
 node scripts/figma-pixel.mjs sync --url "https://www.figma.com/design/...?...node-id=0-1"
+node scripts/figma-pixel.mjs sync --url "https://www.figma.com/design/...?...node-id=0-1" --auto-interactions --interaction-profile game
 node scripts/figma-pixel.mjs serve --port 4173
 node scripts/figma-pixel.mjs plugin-bridge --port 4758
 node scripts/figma-pixel.mjs verify --threshold 95
@@ -131,6 +206,10 @@ figma-pixel plugin-bridge
 figma-pixel auto-tune
 figma-pixel mcp
 ```
+
+`sync` reuses local 4x PNG/SVG/image exports when the Figma file revision has not changed. Use `--no-cache` when you intentionally need to force fresh downloads.
+
+Use `--auto-interactions` when a user wants the generated preview to add feedback to clickable-looking surfaces. You can tune motion style with `--interaction-profile game|social|product`.
 
 ## Output structure
 

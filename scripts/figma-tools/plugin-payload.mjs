@@ -60,7 +60,9 @@ export async function writePluginArtifact({ assetsDir, artifact }) {
 }
 
 export function normalizePluginPayloadToManifest(payload) {
-  const roots = payload.roots?.length ? payload.roots : payload.nodes?.filter((node) => ['FRAME', 'COMPONENT', 'INSTANCE', 'GROUP', 'SECTION'].includes(node.type)).slice(0, 1) ?? [];
+  const rawRoots = payload.roots?.length ? payload.roots : payload.nodes?.filter((node) => ['FRAME', 'COMPONENT', 'INSTANCE', 'GROUP', 'SECTION'].includes(node.type)).slice(0, 1) ?? [];
+  const screenRoots = rawRoots.filter(isScreenRoot);
+  const roots = screenRoots.length ? screenRoots : rawRoots;
   const fallbackRoot = roots[0] ?? payload.nodes?.[0] ?? { id: 'root', name: payload.source?.pageName ?? 'Figma Root', absoluteBox: { x: 0, y: 0, width: 0, height: 0 } };
   const artifactMap = buildArtifactMap(payload.artifacts ?? []);
   const nodeById = new Map((payload.nodes ?? []).map((node) => [node.id, node]));
@@ -88,6 +90,13 @@ export function normalizePluginPayloadToManifest(payload) {
   };
   manifest.summary = summarizePluginManifest({ ...manifest, nodes: screens.flatMap((screen) => screen.nodes ?? []) });
   return manifest;
+}
+
+function isScreenRoot(root) {
+  const box = normalizeBox(root.absoluteBox ?? root.box);
+  return ['FRAME', 'COMPONENT', 'INSTANCE', 'SECTION'].includes(root.type)
+    && box.width >= 300
+    && box.height >= 300;
 }
 
 function pluginRootToScreen(root, nodeById, artifactMap, artifacts) {

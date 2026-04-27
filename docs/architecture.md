@@ -1,123 +1,48 @@
 # Architecture
 
-Figma Pixel Bridge is a local, bidirectional design-to-code bridge. The primary path exports Figma frames into high-fidelity frontend previews. The reverse path imports local frontend/Pencil design data back into Figma as editable nodes. The system is designed around one principle: Figma's rendered frame export is the visual source of truth, while the node tree provides structure, metadata, and interaction targets.
+Figma Pixel Bridge is a high-fidelity Figma-to-frontend pipeline. It is not a pure "node JSON to divs" converter, and it is not the official Figma MCP. It combines structured design extraction with Figma's own rendered exports.
 
-## Goals
-
-- Extract enough Figma structure for AI agents and developers to understand the UI.
-- Export assets at high enough quality to avoid blurred backgrounds, icons, and character art.
-- Produce a runnable local preview quickly.
-- Import local frontend/Pencil design data back into Figma when needed.
-- Preserve visual parity even when editable HTML/CSS reconstruction is imperfect.
-- Provide a repeatable visual self-check instead of relying only on manual inspection.
-
-## Forward pipeline: Figma to frontend
+## Pipeline
 
 ```mermaid
 flowchart LR
-  A[Figma URL or selected frame] --> B{Input path}
-  B -->|REST API| C[Figma API sync]
-  B -->|Plugin| D[Local plugin bridge]
-  C --> E[Design manifest]
+  A[Figma file] --> B[Figma API or Plugin Bridge]
+  B --> C[Design Manifest]
+  B --> D[High-res Assets]
+  C --> E[Preview Generator]
   D --> E
-  C --> F[Asset exports]
-  D --> F
-  E --> G[Preview generator]
-  F --> G
-  G --> H[Interactive local preview]
-  H --> I[Visual diff report]
-  I --> J[Auto tune / pixel-lock fallback]
+  E --> F[Runnable Frontend Preview]
+  F --> G[Visual Diff]
+  G --> H[Auto Tune / Pixel Lock]
 ```
 
-## Reverse pipeline: frontend to Figma
+## Layers
 
-```mermaid
-flowchart LR
-  A[Local frontend or Pencil data] --> B[Frontend payload bridge]
-  B --> C[Importer plugin]
-  C --> D[Figma page]
-  D --> E[Editable frames and layers]
-```
+- **Design manifest**: normalized frame, node, text, fill, stroke, radius, effect, typography, component, and asset references.
+- **Asset layer**: original image fills, SVG vector exports, and 4x frame/root exports.
+- **Editable layer**: HTML/CSS reconstruction for inspectability and later conversion work.
+- **Pixel-lock layer**: exact SVG/PNG frame export used to preserve final visual output.
+- **Interaction layer**: transparent hotspots over the pixel-lock layer so the preview can remain interactive.
+- **FX layer**: optional motion such as scan lines, route transitions, and click feedback.
+- **Visual diff layer**: compares outputs and keeps the preview above the configured threshold.
 
-The reverse path is intentionally marked experimental. It is useful for taking generated or locally maintained UI structure and recreating it inside a Figma file, but it does not claim perfect visual parity with browser output.
+## Connector semantics
 
-## Main components
+Pixel Bridge has two ways to obtain Figma data:
 
-### Figma API sync
+- **REST API sync**: uses the user's Figma token and therefore uses Figma REST API quota.
+- **Local plugin bridge**: runs inside Figma and sends selected/page exports to `localhost`; it does not use the REST API token or official Figma MCP quota.
 
-`figma-sync.mjs` reads the configured Figma file, hydrates selected nodes, collects asset candidates, exports binary assets, and writes the normalized manifest.
+The local MCP-compatible server is an adapter around Pixel Bridge's own CLI pipeline. It should be described as "MCP-compatible" or "local AI-tool adapter", not as the official Figma MCP.
 
-### Plugin bridge
+## Speed without losing fidelity
 
-`figma-plugin-bridge.mjs` receives payloads from the local Figma plugin. This is useful when API rate limits block the REST flow or when exporting the current Figma selection is more reliable.
+The bridge keeps Figma's rendered 4x exports as the visual source of truth, but avoids paying their cost repeatedly. If the Figma file revision is unchanged, existing local image, SVG, and frame exports are reused. In the generated preview, only the active pixel-lock frame loads eagerly; inactive frames keep their original 4x source in `data-src` and are loaded on navigation intent, hover prefetch, or route activation.
 
-### Design manifest
+## Opt-in interaction enrichment
 
-The manifest is the normalized contract between extraction and rendering. It records:
+When `autoInteractions` is enabled, the preview generator adds feedback hotspots over button-like, card-like, and selectable surfaces while preserving the exact pixel layer underneath. It also infers whether screens are same-level states, such as `2.1`, `2.2`, and `2.3` gunsmith views, and uses state-reveal transitions instead of hard page cuts. Motion intensity adapts by profile: game, social, or product.
 
-- root frame size and origin
-- nodes and absolute geometry
-- text content and typography
-- fills, strokes, opacity, effects, and corner radii
-- component metadata
-- local image, SVG, and frame export paths
+## Why it is more accurate than plain node extraction
 
-### Asset layer
-
-The asset pipeline writes local files for:
-
-- original image fills
-- SVG vector/icon exports
-- high-resolution root/frame PNG exports
-- exact SVG frame exports from plugin mode
-
-### Preview generator
-
-`preview-generator.mjs` builds a local HTML preview with multiple layers:
-
-| Layer | Purpose |
-| --- | --- |
-| Editable reconstruction | HTML/CSS representation of extracted nodes. |
-| Pixel-lock layer | Exact exported Figma frame for visual fidelity. |
-| Interaction layer | Transparent hotspots for route changes and UI actions. |
-| FX layer | Optional scan/rain/click/transition effects. |
-| Inspector panel | Hidden debug panel for colors, typography, radii, and routes. |
-
-### Visual diff and auto tune
-
-`figma-verify.mjs` compares image outputs and writes a visual report. `figma-auto-tune.mjs` keeps the preview in pixel-lock-first mode when editable reconstruction falls below the configured threshold.
-
-### Frontend-to-Figma importer
-
-`frontend-to-figma-bridge.mjs` serves a local payload, and `figma-importer-plugin/` consumes it inside Figma to create editable frames. This gives the project a second direction: frontend/Pencil data can flow back into Figma for further design work.
-
-## Why this differs from plain node-to-code conversion
-
-Plain node extraction is useful but incomplete. It can lose information at the render boundary: image crop behavior, vector export details, masks, blend modes, shadows, text antialiasing, and Figma's own effect compositing.
-
-Figma Pixel Bridge treats the exported Figma frame as the fidelity anchor. The generated preview can still expose structured nodes and interactions, but it does not pretend that every complex design can be perfectly reconstructed as plain divs on the first pass.
-
-## Data flow
-
-```text
-Forward:
-  .env.local / CLI args
-    -> Figma config
-    -> API sync or plugin bridge
-    -> public/figma-assets/design-manifest.json
-    -> generated/figma-preview/index.html
-    -> reports/figma-visual-diff/report.md
-
-Reverse:
-  local frontend/Pencil data
-    -> frontend-to-figma bridge
-    -> Figma importer plugin
-    -> editable Figma frames
-```
-
-## Security model
-
-- Tokens stay in `.env.local` or process environment variables.
-- Runtime assets are ignored by git because they may include private design material.
-- Local bridge servers are development tools and should not be exposed publicly.
-- Error messages redact token-like URL parameters where possible.
+Plain node extraction loses information at the render boundary: font antialiasing, blend modes, image crop behavior, masks, vector export details, and Figma's own effect compositing. Pixel Bridge treats Figma's rendered export as the source of visual truth, then layers semantic structure and interaction on top.

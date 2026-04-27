@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 430, height: 520, themeColors: true });
+figma.showUI(__html__, { width: 440, height: 660, themeColors: true });
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type !== 'import-payload') return;

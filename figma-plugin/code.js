@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 420, height: 560, themeColors: true });
+figma.showUI(__html__, { width: 440, height: 680, themeColors: true });
 
 const VECTOR_TYPES = new Set(['VECTOR', 'BOOLEAN_OPERATION', 'STAR', 'LINE', 'REGULAR_POLYGON']);
 const EXPORTABLE_TYPES = new Set(['FRAME', 'COMPONENT', 'INSTANCE', 'GROUP', 'SECTION']);

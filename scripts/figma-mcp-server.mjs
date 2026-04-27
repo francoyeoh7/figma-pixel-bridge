@@ -71,17 +71,17 @@ function listTools() {
   return [
     {
       name: 'figma.sync',
-      description: 'Fetch the configured Figma file, export high-resolution assets, write the manifest, and generate preview HTML.',
+      description: 'Local Pixel Bridge REST-sync path: fetches the configured Figma file with a user token, exports high-resolution assets, writes the manifest, and generates preview HTML. This is not the official Figma MCP. If REST API quota is exhausted, use the local plugin bridge instead.',
       inputSchema: toolSchema({ includeDownloadAssets: true, includeGeneratePreview: true }),
     },
     {
       name: 'figma.analyze',
-      description: 'Fetch and analyze the configured Figma file, writing a design manifest without downloading binary assets.',
+      description: 'Local Pixel Bridge REST-analysis path: uses the user token to analyze the configured Figma file and write a design manifest without binary assets. This path uses Figma REST API quota.',
       inputSchema: toolSchema({ includeDownloadAssets: false, includeGeneratePreview: false }),
     },
     {
       name: 'figma.generatePreview',
-      description: 'Generate or regenerate the preview HTML from the latest manifest; if no manifest exists, runs a full sync.',
+      description: 'Generate or regenerate preview HTML from the latest local manifest. This does not call Figma if a manifest already exists; if no manifest exists, it runs the REST-sync path.',
       inputSchema: toolSchema({ includeDownloadAssets: true, includeGeneratePreview: true }),
     },
   ];
